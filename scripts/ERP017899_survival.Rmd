@@ -1,0 +1,178 @@
+---
+title: "Survival"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = T)
+
+library(tidyverse)
+library(phyloseq)
+library(survival)
+library(ranger)
+library(caret)
+library(pec)
+```
+
+## Baseline GM composition and survival
+Dataset ERP017899 contains baseline GMs and survival information for up to two years of 41 patients who underwent allo-HSCT.
+
+Below, we use relative abundances and counts summarized at the species level.
+
+```{r}
+
+load("../data/ERP017899_phyloseq.rda")
+ERP017899_mt <- phyloseq::sample_data(ERP017899_phyloseq)
+ERP017899_ps_species <- phyloseq::tax_glom(ERP017899_phyloseq, "Species", NArm = F)
+
+ERP017899_ps_species
+```
+
+So this leaves us with 428 species-level or higher order taxa. Below, we work with the OTU table, in which we prefer using human readable taxon identifiers instead of the ASV nucleotide sequence.
+
+```{r}
+ERP017899_otu <- as.matrix(phyloseq::otu_table(ERP017899_ps_species))
+rownames(ERP017899_otu) <- 
+  sapply(rownames(ERP017899_otu),
+         function(otu) {
+           lineage <- as.character(phyloseq::tax_table(ERP017899_ps_species)[otu])
+           level <- length(which(gsub("\\w__", "", lineage) != ""))
+           if (level==7) {
+             paste(gsub("\\w__", "", lineage[6]), gsub("\\w__", "", lineage[7]))
+           } else
+             lineage[level]
+           })
+```
+
+We set up counts to be used by the random survival forest. We exclude higher level taxa, retaining only taxa resolved at the species level. Next, we grow 50 survival forests and retrieve variable importance each time, using permutations.
+
+```{r}
+
+r_data <- t(as.matrix(1+ceiling(1E8*ERP017899_otu[
+    grepl(" ", rownames(ERP017899_otu)),ERP017899_mt$sampleID])))
+r_vars <- gsub(" ", "_", gsub("[/_]", ".", as.character(colnames(r_data))))
+colnames(r_data) <- r_vars
+rf_data <- dplyr::filter(data.frame(ERP017899_mt, r_data), !is.na(deceased))
+
+folds <- 50
+ERP017899_rfFit_vi <- do.call(rbind, Map(function(i) {
+    rfFit <- ranger::ranger(
+    paste0("Surv(right_censor_time, deceased) ~ ", 
+           paste(r_vars, collapse="+")),
+    data = rf_data,  num.trees = 250, mtry = 50,
+    importance = "impurity_corrected", splitrule = "extratrees",
+    num.random.splits=10)
+    as_tibble(
+      ranger::importance_pvalues(
+        rfFit, method = "altmann", num.permutations=50,
+        formula=paste0("Surv(right_censor_time, deceased) ~ ", 
+                       paste(r_vars, collapse="+")),
+        data=dplyr::filter(rf_data, !is.na(deceased))),
+      rownames="taxon") %>%
+      dplyr::arrange(pvalue, desc(importance)) %>%
+      dplyr::filter(pvalue<=.05)
+}, 1:folds)) %>% 
+  dplyr::group_by(taxon)%>%
+  dplyr::summarize(n=n(), importance=median(importance)) %>%
+  dplyr::arrange(desc(importance)) %>%
+  dplyr::filter(n>=10)
+
+ERP017899_rfFit_vi
+```
+
+Since ranger does not give us polarity with the importance, we estimate polarity from average relative abundance. It turns out that the vast majority of selected taxa is associated with mortality, so we retain only those taxa.
+
+```{r}
+rfFit_RA <- ERP017899_mt %>%
+  dplyr::filter(!is.na(deceased)) %>%
+  dplyr::left_join(
+    as_tibble(data.frame(r_data[,ERP017899_rfFit_vi$taxon]), rownames="sampleID"),
+    by = "sampleID") %>%
+  dplyr::select(deceased, ERP017899_rfFit_vi$taxon) %>%
+  dplyr::group_by(deceased) %>%
+  dplyr::summarise_all(mean)
+names <- c("survival", "death")
+rfFit_RA <- as_tibble(t(rfFit_RA[,-1]), rownames = "taxon")
+colnames(rfFit_RA) <- c("taxon", names)
+rfFit_RA <- rfFit_RA %>%
+  dplyr::mutate(max=pmax(!!!rlang::syms(names)),
+                association=ifelse(max==death, "death", "survival")) %>%
+  dplyr::filter(death>2*survival)
+
+ERP017899_rfFit_vi <- ERP017899_rfFit_vi %>%
+    dplyr::filter(taxon %in% rfFit_RA$taxon) %>%
+    dplyr::arrange(desc(importance))
+```
+
+For the final model evaluation, we use censor times expressed in months. We test models with different numbers of taxa, starting with the most important taxa. 
+
+```{r}
+
+rf_data$right_censor_time <- floor(rf_data$right_censor_time/30)
+folds <- 20 # for <nfold> cross-validation
+
+ERP017899_mpec <- do.call(rbind, Map(function(m){
+  i <- 1
+  pec_list <- vector("list",folds)
+  while(i <= folds) {
+    cvIndex <- caret::createFolds(factor(rf_data$decease), 
+                                  k=2, returnTrain=T)
+    # define training / test data
+    train_data <- rf_data[cvIndex[[1]],]
+    eval_data <- rf_data[cvIndex[[2]],]
+    # train
+    rsf <- ranger::ranger(
+      paste0("Surv(right_censor_time, deceased) ~ ", 
+             paste(head(ERP017899_rfFit_vi$taxon, m), collapse="+")),
+      data = train_data,
+      num.trees = 250,
+      mtry = m,
+      importance = "impurity",
+      splitrule = "extratrees",
+      num.random.splits=10)
+    # predict (on hold out test set)
+    pred <- predict(rsf, eval_data)
+    # evaluate
+    model <- list("rsf"=pred$survival)
+    # for obscure reasons, pec often expects a different number of 
+    # times than the times in the predict matrix
+    pec_ = NULL
+    tryCatch({
+      pec_ <- pec::pec(
+        object = model,
+        formula = Surv(time = right_censor_time, event = deceased) ~ 1, # Kaplan-Meier
+        traindata = train_data,
+        data = eval_data,
+        exact = T,
+        reference = F,
+        start = pred$unique.death.times[1]
+        )
+    }, error = function(e) {
+      pec_ = NULL
+    })
+    if (!is.null(pec_)) {
+      pec_list[[i]] <- pec_
+      i <- i+1
+    }
+  }
+  tibble(n=m, mpec=mean(unlist(lapply(pec_list, pec::crps))))
+}, 1:dim(ERP017899_rfFit_vi)[1]))
+```
+
+Finally, we can plot the variable importance for the best model. Your mileage may vary w.r.t. the manuscript when it comes to the number of taxa retained.
+
+```{r fig.width=3.5, fig.height=3, fig.align='center'}
+
+ERP017899_rfFit_vi %>%
+  dplyr::filter(row_number() <= which.min(ERP017899_mpec$mpec)) %>%
+  dplyr::mutate(taxon=factor(taxon, levels=rev(taxon))) %>%
+  ggplot(aes(x=taxon, y=importance)) +
+  geom_bar(stat="identity") + 
+  coord_flip() + 
+  theme_classic() +
+  theme(axis.line=element_blank(),
+        legend.position="none",
+        text=element_text(size=10))
+```

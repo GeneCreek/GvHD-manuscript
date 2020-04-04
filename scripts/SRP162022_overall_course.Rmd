@@ -1,0 +1,70 @@
+---
+title: "Overall course"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(phyloseq)
+library(ggplot2)
+library(cowplot)
+```
+
+## Overall course
+Data set SRP162022 comprises patients undergoing allo-HSCT (n=736) of which 14 received an auto-FMT 49 days after stem cell infusion. Recovery of Shannon species diversity seems to be boosted through auto-FMT, whereas strict anaerobes were not recovered. The antimicrobial resistance of the microbiome decreased, as reflected by the average biological safety level (BSL), which means that a less pathogenic GM was recovered through auto-FMT.
+
+```{r overall, fig.width=3.5, fig.height=2.5, fig.cap=caption, fig.align='center'}
+
+load("../data/SRP162022_phyloseq.rda")
+SRP162022_mt <- phyloseq::sample_data(SRP162022_phyloseq)
+
+gg1 <- ggplot(SRP162022_mt, aes(x=day, y=shannon)) +
+  stat_smooth(color="#417178", method = 'loess', span=0.8) +
+  stat_smooth(data=dplyr::filter(SRP162022_mt, grepl("T", label)), 
+              color="red", method = 'loess', se=F, span = 0.8) +
+  geom_vline(xintercept = 49, linetype="dashed") +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  theme_classic() + ylab("Shannon div.") + xlab(NULL) +
+  theme(axis.line=element_blank(), axis.text=element_blank(),
+        axis.ticks=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+gg2 <- ggplot(SRP162022_mt, aes(x=day, y=bsl)) + 
+  stat_smooth(color="#417178", method = 'loess', span=0.8) +
+  stat_smooth(data=dplyr::filter(SRP162022_mt, grepl("T", label)), 
+              color="red", method = 'loess', se=F, span = 0.8) +
+  geom_vline(xintercept = 49, linetype="dashed") +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  theme_classic() + ylab("BSL") + xlab(NULL) +
+  theme(axis.line=element_blank(), axis.text=element_blank(),
+        axis.ticks=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+gg3 <- ggplot(SRP162022_mt, aes(x=day, y=phylodiv)) +
+  stat_smooth(color="#417178", method = 'loess', span=0.8) +
+  stat_smooth(data=dplyr::filter(SRP162022_mt, grepl("T", label)), 
+              color="red", method = 'loess', se=F, span = 0.8) +
+  geom_vline(xintercept = 49, linetype="dashed") +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  scale_x_continuous(breaks=seq(-25, 100, by=25)) +
+  theme_classic() + ylab("phylogenetic div.") +
+  theme(axis.line=element_blank(), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+gg4 <- ggplot(SRP162022_mt, aes(x=day, y=anaerobe)) +
+  stat_smooth(color="#417178", method = 'loess', span = 0.8) +
+  stat_smooth(data=dplyr::filter(SRP162022_mt, grepl("T", label)), 
+              color="red", method = 'loess', se=F, span = 0.8) +
+  geom_vline(xintercept = 49, linetype="dashed") +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  scale_x_continuous(breaks=seq(-25, 100, by=25)) +
+  theme_classic() + ylab("strict anaerobes") +
+  theme(axis.line=element_blank(), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+
+cowplot::plot_grid(gg1, gg2, gg3, gg4, nrow=2)
+```
+
+

@@ -1,0 +1,121 @@
+---
+title: "Modulating the aGvHD microbiome"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(tidyverse)
+library(DESeq2)
+library(scales)
+```
+
+# aGvHD onset combination dataset
+We combined data sets SRP243841, ERP105598 and SRP234378 into a 68 patients and 80 samples dataset "ON", comprising samples taken at aGvDH onset or beyond with matched controls. 
+
+```{r}
+load("../data/ON_mt.rda")
+load("../data/ON_species_comb.rda")
+```
+
+# DESeq analysis
+The regression analysis (Onset_regression.Rmd) provides us with a non-redundant set of aGvHD/control associated species. To see if we can modulate the aGvHD associated microbiome using qualified presumption of safety (QPS) species, we want to get a redundant set of species. To this end, we deploy DESeq differential analysis as follows.
+
+```{r}
+countData <- as.matrix(1+ceiling(1E8*ON_species_comb[
+  grepl(" ", rownames(ON_species_comb)),ON_mt$sampleID]))
+rownames(countData) <- as.character(rownames(countData))
+response <- ON_mt$status
+dds <- DESeqDataSetFromMatrix(countData, DataFrame(response), ~ response)
+dds <- DESeq(dds, test="Wald", fitType="local")
+res = results(dds, cooksCutoff = FALSE)
+alpha = 0.0001
+sigtab = res[which(res$padj < alpha), ]
+ON_deseq <- tibble(taxon=rownames(sigtab), 
+                   log2FC=sigtab$log2FoldChange, 
+                   count=rowSums(countData)[rownames(sigtab)]) %>%
+  dplyr::mutate(association=ifelse(log2FC<0, "no GvHD", "GvHD")) %>%
+  dplyr::arrange(desc(count)) %>%
+  dplyr::filter(row_number()<=50) %>%
+  dplyr::select(-count)
+
+ON_deseq
+```
+
+# Modulating the aGvHD microbiome
+
+We retained the top 50 most abundant species with significant (pAdj < 0.001) differential abundance between the two states, case (GvHD) and control (no GvHD). With this selection of taxa in hand we computed Chi-squared pairwise tests of QPS species prevalence. Higher than expected joint presence is regarded as synergy whereas lower than expected joint prevalence is regarded as antagonism. The following objects are pre-computed.
+
+```{r}
+
+load("../data/summ_case_QPS_disp.rda")
+load("../data/summ_ctrl_QPS_disp.rda")
+load("../data/summ_cooccur_QPS_disp.rda")
+
+summ_case_QPS_disp
+```
+
+The following plots the co-exclusion between selected top QPS species and the cas-associated species from the DESeq analysis. We want to see as much red as possible.
+
+```{r}
+ggplot(summ_case_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("case associated") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+
+```
+
+Bifidobacterium longum, which we already encountered in the regression analysis as a control associated species, ranks second in our analysis as a QPS species antagonizing the cas-associated taxa. Next, we verify that candidate QPS species do not also antagonize control-associated species, or at least to a lesser extent.
+
+```{r}
+ggplot(summ_ctrl_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("control associated") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+```
+
+We can see from this plot that Bifidobacterium longum performs better as Leucognostic lactis, it is not only more respectful (less red) but has more synergy with control associated species (more green).
+
+Finally, to see if we can combine Bifidobacterium longum with other QPS species to increase "coverage" of the case-asociated spectrum, we have to worry about compatibility between QPS species.
+
+```{r}
+ggplot(summ_cooccur_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("QPS species") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+```
+
+For instance, we can see that it is no use combining Bifidobacterium longum with, say, Bifidobacterium adolescentis, because the two are likely in antagonistic relation. But for instance combination with Bacillus clausi

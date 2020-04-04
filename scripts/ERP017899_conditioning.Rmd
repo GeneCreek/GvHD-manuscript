@@ -1,0 +1,75 @@
+---
+title: "Conditioning"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(phyloseq)
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+```
+
+## Influence of conditioning on the GM
+Dataset ERP017899 contains detailed conditioning information and baseline GM samples of 41 patients who underwent allo-HSCT. The conditioning was qualified as low, intermediate or high with few cases of high conditioning. We regrouped the intermediate level with the high level and tested various GM composition covariates comparing the two regimes. The Shannon species richness and the strict anaerobe proportion reached significance.
+
+```{r conditioning, fig.width=3.5, fig.height=2.5, fig.align='center'}
+
+load("../data/ERP017899_phyloseq.rda")
+ERP017899_mt <- phyloseq::sample_data(ERP017899_phyloseq)
+
+comparisons <- list(c("low", "high"))
+gg1 <- ERP017899_mt %>%
+  dplyr::filter(!is.na(conditioning)) %>%
+  dplyr::mutate(conditioning=factor(ifelse(conditioning=="Low", "low", "high"), 
+                                    levels=c("low", "high"))) %>%
+  ggplot(aes(x=conditioning, y=anaerobe)) +
+  geom_boxplot(alpha = 0.50) +
+  geom_jitter(width = 0.2, shape=21, fill="grey50", colour="grey50") +
+  stat_compare_means(comparisons = comparisons, size=3) +
+  ylim(0, 1.1) +
+  theme_classic() + ylab("strict anaerobes") +
+  theme(axis.line=element_blank(), 
+        legend.position="none",
+        text=element_text(size=10))
+
+gg2 <- ERP017899_mt %>%
+  dplyr::filter(!is.na(conditioning)) %>%
+  dplyr::mutate(conditioning=factor(ifelse(conditioning=="Low", "low", "high"), 
+                                    levels=c("low", "high"))) %>%
+  ggplot(aes(x=conditioning, y=shannon/20)) +
+  geom_boxplot(alpha = 0.50) +
+  geom_jitter(width = 0.2, shape=21, fill="grey50", colour="grey50") +
+  stat_compare_means(comparisons = comparisons, size=3) +
+  ylim(1,4.7) +
+  theme_classic() + ylab("Shannon diversity") +
+  theme(axis.line=element_blank(),
+        legend.position="none",
+        text=element_text(size=10))
+
+cowplot::plot_grid(gg1, gg2, ncol = 2)
+```
+
+Furthermore, the use of the immunosupressant cyclosporine, which in the dataset is mutually exclusive with the use of tacrolimus, seems to favour the growth of gram-positive bacteria.
+
+```{r cyclosporine, fig.width=2.5, fig.height=2.5, fig.align='center'}
+
+comparisons <- list(c("no", "yes"), c("donor", "yes"))
+ERP017899_mt %>%
+  dplyr::mutate(cyclosporine=factor(ifelse(type=="Donor", "donor", as.character(cyclosporine)),
+                                    levels=c("donor", "no", "yes"))) %>%
+  dplyr::filter(!is.na(cyclosporine)) %>%
+  ggplot(aes(x=cyclosporine, y=gram-1)) +
+  geom_boxplot(alpha = 0.50) +
+  geom_jitter(width = 0.2, shape=21, fill="grey50", colour="grey50") +
+  stat_compare_means(comparisons = comparisons, size = 3) +
+  ylim(-1, 1.3) +
+  theme_classic() + ylab("gram staining balance") +
+  theme(axis.line=element_blank(),
+        legend.position="none",
+        text=element_text(size=10))
+```

@@ -1,0 +1,203 @@
+---
+title: "Onset, regression"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(tidyverse)
+library(relaimpo)
+library(ggpubr)
+```
+
+# aGvHD onset combination dataset
+We combined data sets SRP243841, ERP105598 and SRP234378 into a 68 patients and 80 samples dataset "ON", comprising samples taken at aGvDH onset or beyond with matched controls. 
+
+```{r}
+load("../data/ON_mt.rda")
+load("../data/ON_species_comb.rda")
+```
+
+# Shannon species diversity
+We can easily spot the difference in species diverity at or about aGvHD onset reported by several studies.
+
+```{r fig.width=2.5, fig.height=2, fig.align='center'}
+
+comparisons <- list(c("no GvHD", "GvHD"))
+ggplot(ON_mt, aes(x=status, y=shannon/20)) +
+  geom_boxplot(alpha = 0.50, outlier.shape = NA) +
+  geom_jitter(width = 0.2, shape=21, 
+              aes(colour=status=="no GvHD", fill=status=="no GvHD")) +
+  stat_compare_means(comparisons = comparisons, size=3) +
+  ylim(2,8) +
+  theme_classic() + ylab("Shannon diversity") +
+  theme(axis.line=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+
+```
+
+# Linear regression
+But we are also interested in individual species which could be used as biomarkers, provided we can "explain" a substantial part of the aGvHD/control variability through a combination of a limited number of species. To this end we use the R package relaimpo, which we have incorporated in the following algorithm.
+
+```{r}
+relaimp_species <- function(var, species_comb, model_data, minprev=50, 
+                            limRA=0.005, minRA=0.001, minpratt=.02, species=T,
+                            maxreg=0, arrange=NULL, addvars=NULL, std_species=NULL,
+                            a_priori_species=NULL,
+                            stdvars=c("phylodiv","chao","shannon","bsl","temp","ph","gram","oxygen","anaerobe")) {
+  if (!is.null(species_comb)) {
+    if (species)
+      species_names <- rownames(species_comb)[!grepl("__",rownames(species_comb))]
+    else
+      # species_names <- as.character(rownames(species_comb))[
+      #   -which(rownames(species_comb) %in% c("unknown","character(0)"))]
+      species_names <- as.character(rownames(species_comb))
+    species_RA <- species_comb[rownames(species_comb) %in% species_names,
+                               model_data$sampleID]
+    species_stats <- as_tibble(data.frame(
+      species    = rownames(species_RA),
+      prevalence = 100*Matrix::rowSums(species_RA > minRA)/dim(species_RA)[2],
+      high       = apply(species_RA, 1, function(x) length(which(x > limRA))),
+      check.names = F, stringsAsFactors = F)) %>%
+      dplyr::arrange(desc(high))
+    # we need to constrain the number of regressors to the number of observations
+    nobs <- dim(model_data)[1]
+    nstd <- length(stdvars)+length(addvars)+length(std_species)
+    species_high <-
+      head(dplyr::filter(species_stats,
+                         high>minRA|prevalence>minprev,
+                         species!="unknown")$species, nobs-nstd-2)
+    if (!is.null(a_priori_species))
+      bact_RA <- as_tibble(data.frame(sampleID=model_data$sampleID,
+                                      as.matrix(Matrix::t(species_comb[a_priori_species,model_data$sampleID])),
+                                      stringsAsFactors = F))
+    else if (!is.null(std_species))
+      bact_RA <- as_tibble(data.frame(sampleID=model_data$sampleID,
+                                    as.matrix(Matrix::t(species_comb[unique(c(std_species,species_high)),model_data$sampleID])),
+                                    stringsAsFactors = F))
+    else
+      bact_RA <- as_tibble(data.frame(sampleID=model_data$sampleID,
+                                      as.matrix(Matrix::t(species_comb[species_high,model_data$sampleID])),
+                                      stringsAsFactors = F))
+    if ("character.0." %in% colnames(bact_RA))
+      bact_RA <- dplyr::rename(bact_RA, unknown=character.0.)
+    nls_data <- left_join(model_data, bact_RA, by="sampleID") %>%
+      dplyr::mutate(stage=as.numeric(get(var)), var=get(var))
+    addvars <- c(colnames(bact_RA)[-1], addvars)
+  } else {
+    nls_data <- dplyr::mutate(model_data, stage=as.numeric(get(var)), var=get(var))
+    species_high <- NULL
+    bact_RA <- NULL
+  }
+  bact_model1 <- lm(formula(paste0("stage ~ ", paste(c(stdvars, addvars), collapse="+"))), nls_data)
+  bact_relaimpo1 <- relaimpo::calc.relimp(bact_model1,type=c("pratt"), rela=F, always=gsub(" ", ".", std_species, fixed=T))
+  bact_best1 <- names(which(bact_relaimpo1$pratt>=minpratt))
+  bact_model2 <- lm(formula(paste0("stage ~ ", paste(bact_best1, collapse="+"))), nls_data)
+  bact_relaimpo2 <- relaimpo::calc.relimp(bact_model2, type=c("pratt"), rela=F)
+  bact_best2 <- names(which(bact_relaimpo2$pratt>=minpratt))
+  bact_model3 <- lm(formula(paste0("stage ~ ", paste(bact_best2, collapse="+"))), nls_data)
+  bact_relaimpo3 <- relaimpo::calc.relimp(bact_model3, type=c("pratt"), rela=F)
+  bact_best3 <- names(which(bact_relaimpo3$pratt>=minpratt))
+  bact_model <- lm(formula(paste0("stage ~ ", paste(bact_best3, collapse="+"))), nls_data)
+  bact_relaimpo <- relaimpo::calc.relimp(bact_model, type=c("pratt"), rela=F)
+  if (maxreg > 1) {
+    bact_best <- names(head(sort(bact_relaimpo$pratt, decreasing = T), n=maxreg))
+    bact_model <- lm(formula(paste0("stage ~ ", paste(bact_best, collapse="+"))), nls_data)
+    boot_relaimpo <- relaimpo::booteval.relimp(
+      relaimpo::boot.relimp(bact_model, type=c("lmg"), b=100, rela=F, diff=F))
+  } else
+    boot_relaimpo <- relaimpo::booteval.relimp(
+      relaimpo::boot.relimp(bact_model, type=c("lmg"), b=100, rela=F, diff=F))
+  coeff <- as_tibble(data.frame(regressor=names(bact_model$coefficients),
+                                coeff=bact_model$coefficients, stringsAsFactors = F))
+  regress <- as_tibble(data.frame(regressor=boot_relaimpo@namen[-1],
+                                  rank=as.integer(boot_relaimpo@lmg.rank),
+                                  R2=boot_relaimpo@lmg,
+                                  stringsAsFactors = F)) %>%
+    left_join(coeff, by="regressor") %>%
+    dplyr::mutate(R2=ifelse(coeff<0, -R2, R2),
+                  lower=ifelse(coeff<0, -as.numeric(boot_relaimpo@lmg.upper), as.numeric(boot_relaimpo@lmg.lower)),
+                  upper=ifelse(coeff<0, -as.numeric(boot_relaimpo@lmg.lower), as.numeric(boot_relaimpo@lmg.upper)))
+
+  # investigate colinearity
+  imc <- mctest::imcdiag(nls_data[,regress$regressor], nls_data$stage, corr=T)
+  if (length(imc$pval) > 0) {
+    imc_names <- gsub("x(.+)", "\\1", names(imc$pval))
+    ridge <- MASS::lm.ridge(bact_model, lambda=seq(100, 0.1))
+    lambda <- as.numeric(names(which(ridge$GCV==min(ridge$GCV))))
+    ridge_coeff <- MASS::lm.ridge(bact_model, lambda=lambda)
+    ridge_coeff <- as_tibble(data.frame(regressor=names(ridge_coeff$coef),
+                                        ridge=as.numeric(ridge_coeff$coef), stringsAsFactors = F))
+    regress <- dplyr::left_join(regress, ridge_coeff, by="regressor") %>%
+      dplyr::select(-coeff) %>%
+      dplyr::rename(coeff=ridge)
+    ggp <- GGally::ggpairs(nls_data,
+                         mapping=ggplot2::aes(color = var),
+                         columns=imc_names,
+                         upper = list(continuous = GGally::wrap("smooth", alpha=0)),
+                         diag = list(continuous = GGally::wrap("densityDiag", alpha = 0.5)),
+                         lower = list(continuous = GGally::wrap("points", size=0.3)))
+  } else {
+    ggp <- NULL
+    imc_names <- NULL
+  }
+
+  if (!is.null(arrange)) {
+    regress <- dplyr::arrange(regress, ifelse(coeff>0, 0, 1), rank) %>%
+      dplyr::mutate(regressor=factor(regressor, levels=rev(regressor)))
+  } else
+    regress <- dplyr::arrange(regress, rank) %>%
+    dplyr::mutate(regressor=factor(regressor, levels=rev(regressor)))
+
+  list(tested=species_high, model=bact_model, R2=boot_relaimpo@R2,
+       regress=regress, data=nls_data, RA_data=bact_RA, imc=imc, imc_names=imc_names, ggp=ggp)
+}
+
+ON_relaimp_status <- relaimp_species("status", ON_species_comb, ON_mt, minpratt=.013,
+                                     minprev=30, limRA=0.002, 
+                                     stdvars=c("shannon", "chao"))
+```
+
+The above returns a rich data object. With the settings above, we test 76 species as well as two global microbiome features as independent variables.
+
+```{r}
+ON_relaimp_status$tested
+```
+
+The final model contains around 13 independent variables. Due to co-linearity and bootstrapping, the exact selection may vary w.r.t. the manuscript.
+
+```{r}
+ON_relaimp_status$model
+```
+
+Nevertheless the total R-squared should be close to 0.5...
+
+```{r}
+ON_relaimp_status$R2
+```
+
+...which breaks down as follows into individual variable contributions...
+
+```{r}
+ON_relaimp_status$regress
+```
+
+...which can be displayed as a bar chart:
+
+```{r}
+ON_relaimp_status$regress %>%
+  ggplot(aes(x=regressor, y=R2, fill=R2<0)) +
+  geom_bar(stat="identity") +
+  coord_flip() + xlab(NULL) +
+  theme_classic() + 
+  annotate("text", x=7.5, y=-.075, parse=T, 
+           label=sprintf("R^2: %.3f", ON_relaimp_status$R2)) +
+  theme(axis.line=element_blank(),
+        legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+
+```
+
