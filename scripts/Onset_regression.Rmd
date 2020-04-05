@@ -144,7 +144,8 @@ relaimp_species <- function(var, species_comb, model_data, minprev=50,
     ggp <- NULL
     imc_names <- NULL
   }
-
+  regress <- regress %>%
+    dplyr::mutate(regressor=gsub("\\.", " ", as.character(regressor)))
   if (!is.null(arrange)) {
     regress <- dplyr::arrange(regress, ifelse(coeff>0, 0, 1), rank) %>%
       dplyr::mutate(regressor=factor(regressor, levels=rev(regressor)))
