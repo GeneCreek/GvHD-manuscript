@@ -16,7 +16,7 @@ library(cowplot)
 ## Overall course
 Data set SRP162022 comprises patients undergoing allo-HSCT (n=736) of which 14 received an auto-FMT 49 days after stem cell infusion. Recovery of Shannon species diversity seems to be boosted through auto-FMT, whereas strict anaerobes were not recovered. The antimicrobial resistance of the microbiome decreased, as reflected by the average biological safety level (BSL), which means that a less pathogenic GM was recovered through auto-FMT.
 
-```{r overall, fig.width=3.5, fig.height=2.5, fig.cap=caption, fig.align='center'}
+```{r overall, fig.width=3.5, fig.height=2.5, fig.align='center'}
 
 load("../data/SRP162022_phyloseq.rda")
 SRP162022_mt <- phyloseq::sample_data(SRP162022_phyloseq)
