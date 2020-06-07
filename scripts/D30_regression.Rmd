@@ -1,0 +1,103 @@
+---
+title: "Onset, regression"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(tidyverse)
+library(ggpubr)
+library(pROC)
+library(mctest)
+```
+
+# aGvHD onset combination dataset
+We combined data sets SRP243841, ERP105598 and SRP234378 into a 68 patients and 80 samples dataset "ON", comprising samples taken at aGvDH onset or beyond with matched controls. 
+
+```{r}
+load("../data/ON_mt.rda")
+load("../data/ON_relaimp_status.rda")
+```
+
+# Biological safety level
+At one month after stem cell infusion, the average biological safety level is higher in aGvHD cases than in controls.
+
+```{r fig.width=2.5, fig.height=2, fig.align='center'}
+
+comparisons <- list(c("no GvHD", "GvHD"))
+ggplot(ON_mt, aes(x=status, y=bsl)) +
+  geom_boxplot(alpha = 0.50, outlier.shape = NA) +
+  geom_jitter(width = 0.2, shape=21, 
+              aes(colour=status=="no GvHD", fill=status=="no GvHD")) +
+  stat_compare_means(comparisons = comparisons, size=3) +
+  ylim(1, 2.1) +
+  theme_classic() + ylab("BSL") +
+  theme(axis.line=element_blank(), legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+
+```
+
+# Linear regression
+But we are also interested in individual species which could be used as biomarkers, provided we can "explain" a substantial part of the aGvHD/control variability through a combination of a limited number of species. To this end we use the R package relaimpo, which we have incorporated in an in-house algorithm, returning a rich data object. With the settings used, we tested 117 species.
+
+```{r}
+ON_relaimp_status$tested
+```
+
+The final model contains 20 independent variables.
+
+```{r}
+ON_relaimp_status$model
+```
+
+The total (unadjusted) R-squared exceeds 0.5...
+
+```{r}
+ON_relaimp_status$R2
+```
+
+...which breaks down as follows into individual variable contributions...
+
+```{r}
+ON_relaimp_status$regress
+```
+
+...which can be displayed as a bar chart:
+
+```{r}
+ON_relaimp_status$regress %>%
+  ggplot(aes(x=regressor, y=R2, fill=R2<0)) +
+  geom_bar(stat="identity") +
+  coord_flip() + xlab(NULL) +
+  theme_classic() + 
+  annotate("text", x=7.5, y=-.075, parse=T, 
+           label=sprintf("R^2: %.3f", ON_relaimp_status$R2)) +
+  theme(axis.line=element_blank(),
+        legend.position="none",
+        text=element_text(family="Open Sans", size=10))
+
+```
+
+We can apply this linear model to the dataset, and get a ROC analysis with the following:
+
+```{r}
+coeffs <- ON_relaimp_status$model$coefficients[-1]
+names(coeffs) <- gsub("\\.", " ", names(coeffs))
+response <- coeffs %*% as.matrix(ON_species_comb[names(coeffs),ON_relaimp_status$data$sampleID])
+ON_mt_response <- ON_relaimp_status$data %>%
+  dplyr::mutate(resp=as.numeric(response)+
+                  ON_relaimp_status$model$coefficients[1])
+
+ggplot(ON_mt_response, aes(x=resp, fill=status!="GvHD")) + 
+  geom_histogram(binwidth=.1)
+
+ON_roc <- pROC::roc(ON_mt_response$status, ON_mt_response$resp)
+pROC::ggroc(ON_roc) +
+  geom_segment(aes(x=1, xend=0, y=0, yend=1), color="grey", linetype="dashed") + 
+  annotate("text", x=.75, y=.55, label=sprintf("AUC: %.3f", ON_roc$auc))
+
+```
+

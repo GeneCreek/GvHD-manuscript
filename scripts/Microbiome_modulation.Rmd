@@ -1,0 +1,87 @@
+---
+title: "Modulating the aGvHD microbiome"
+author: "Marcel de Leeuw, (c) GeneCreek 2020"
+date: "4/4/2020"
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = F)
+
+library(tidyverse)
+library(scales)
+```
+
+
+# Modulating the mortality/aGvHD microbiome
+
+We retained the top 10 mortality associated species at baseline and the aGvHD case and control asociated species at one month posit stem cell infusion. With this selection of taxa in hand we computed Chi-squared pairwise tests of QPS species prevalence. Higher than expected joint presence is regarded as synergy whereas lower than expected joint prevalence is regarded as antagonism. The following objects are pre-computed.
+
+```{r}
+
+load("../data/summ_case_QPS_disp.rda")
+load("../data/summ_ctrl_QPS_disp.rda")
+load("../data/summ_cooccur_QPS_disp.rda")
+
+summ_case_QPS_disp
+```
+
+The following plots the co-exclusion between selected top QPS species and the cas-associated species from the DESeq analysis. We want to see as much red as possible.
+
+```{r}
+ggplot(summ_case_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("case associated") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+
+```
+
+Next, we verify that candidate QPS species do not also antagonize control-associated species, or at least to a lesser extent.
+
+```{r}
+ggplot(summ_ctrl_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("control associated") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+```
+
+Finally, to see if we can combine QPS species to increase "coverage" of the case-asociated spectrum, we have to worry about compatibility between QPS species.
+
+```{r}
+ggplot(summ_cooccur_QPS_disp, aes(x = soi, y = species)) +
+  geom_tile(aes(fill = nscore)) +
+  scale_fill_gradient2(low=muted("red"), mid="white", high=muted("green"), midpoint = 0) +
+  scale_x_discrete(position = "top") +
+  coord_fixed() +
+  xlab("QPS species") + ylab("QPS species") +
+  theme(axis.text.x = element_text(angle=315, hjust=1, vjust=0),
+        legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text=element_text(family="Open Sans", size=9),
+        axis.text=element_text(size=rel(0.9)))
+```
+
+For instance, we can see that it is no use combining Bifidobacterium longum with, say, Bifidobacterium adolescentis, because the two are likely in antagonistic relation.

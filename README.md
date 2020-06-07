@@ -10,8 +10,8 @@ Script looking at the upstream immunosuppressive conditioning influence on the g
 ## ERP017899_survival.Rmd
 Script fitting random survival forests to baseline microbiomes using right-censored survival, the aim being to extract important taxa.
 
-## Onset_regression.Rmd
-Script to extract important species at aGvHD onset, using linear regression
+## D30_regression.Rmd
+Script to project the results of linear regression analysis.
 
-## Onset_modulation.Rmd    
-Script covering the extraction of species in differential abundance at aGvHD onset between cases and controls and the in siilico prediction of co-exclusion and co-occurrence between these species and qualified presumption of safety (QPS) species.
+## Microbiome_modulation.Rmd    
+Script covering the in silico prediction of co-exclusion and co-occurrence between important species and qualified presumption of safety (QPS) species.
